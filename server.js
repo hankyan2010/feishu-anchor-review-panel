@@ -231,83 +231,32 @@ function cleanOcrText(text) {
     .trim();
 }
 
-function splitColumns(line) {
-  return String(line || '').split(/\s{2,}/).map(v => v.trim()).filter(Boolean);
-}
+const PLATFORM_LABELS = {
+  douyin: ['直播时长', '观看人数', '成交金额', '新增粉丝'],
+  videohao: ['直播时长', '观看人数', '成交金额', '成交人数'],
+  kuaishou: ['直播时长', '曝光人数', '成交金额', '客单价']
+};
 
-function pairColumns(labelLine, valueLine) {
-  const labels = splitColumns(labelLine);
-  const values = splitColumns(valueLine);
-  const out = {};
-  for (let i = 0; i < Math.min(labels.length, values.length); i += 1) {
-    out[labels[i]] = values[i];
+function parseLabeledLines(text, labels) {
+  const result = {};
+  const lines = String(text || '').split('\n').map(v => v.trim()).filter(Boolean);
+  for (const line of lines) {
+    for (const label of labels) {
+      if (line.startsWith(label)) {
+        const value = line.slice(label.length).replace(/^[:：\s]+/, '').trim();
+        if (value && !result[label]) result[label] = value;
+        break;
+      }
+    }
   }
-  return out;
-}
-
-function extractFirst(text, pattern) {
-  const match = String(text || '').match(pattern);
-  return match ? match[1].trim() : '';
-}
-
-function extractDouyinMetrics(text) {
-  const lines = cleanOcrText(text).split('\n').map(v => v.trim()).filter(Boolean);
-  const metrics = {
-    '开播时间': extractFirst(text, /开播时间[:：]?\s*([0-9-]{10}\s+[0-9:]{8})/),
-    '关播时间': extractFirst(text, /关播时间[:：]?\s*([0-9-]{10}\s+[0-9:]{8})/),
-    '直播时长': extractFirst(text, /直播时长[:：]?\s*([^\n]+?秒)/)
-  };
-  const firstHeaderIndex = lines.findIndex(line => line.includes('收获音浪') && line.includes('曝光人数'));
-  if (firstHeaderIndex >= 0 && lines[firstHeaderIndex + 1]) Object.assign(metrics, pairColumns(lines[firstHeaderIndex], lines[firstHeaderIndex + 1]));
-  const secondHeaderIndex = lines.findIndex(line => line.includes('会员收入') && line.includes('平均在线人数'));
-  if (secondHeaderIndex >= 0 && lines[secondHeaderIndex + 1]) Object.assign(metrics, pairColumns(lines[secondHeaderIndex], lines[secondHeaderIndex + 1]));
-  if (!metrics['进房率'] && metrics['曝光人数'] && metrics['进房人数']) {
-    const exposure = Number(String(metrics['曝光人数']).replace(/,/g, ''));
-    const enter = Number(String(metrics['进房人数']).replace(/,/g, ''));
-    if (exposure > 0 && enter >= 0) metrics['进房率'] = `${((enter / exposure) * 100).toFixed(1)}%`;
-  }
-  return metrics;
-}
-
-function extractVideohaoMetrics(text) {
-  const lines = cleanOcrText(text).split('\n').map(v => v.trim()).filter(Boolean);
-  const metrics = {
-    '开播时间': extractFirst(text, /开播时间\s*([0-9]{4}[0-9-]{4,}\s*[0-9:]{4,8})/).replace(/^(\d{4})(\d{2})(\d{2})/, '$1-$2-$3'),
-    '开播时长': extractFirst(text, /开播时长[“":：]?\s*([^\s]+秒)/)
-  };
-  const baseIndex = lines.findIndex(line => line.includes('观看人数') && line.includes('观看次数'));
-  if (baseIndex >= 0 && lines[baseIndex + 1]) Object.assign(metrics, pairColumns(lines[baseIndex], lines[baseIndex + 1]));
-  if (baseIndex >= 0 && lines[baseIndex + 2]) {
-    const values = (lines[baseIndex + 2].match(/[0-9]+(?:\.[0-9]+)?/g) || []).slice(0, 4);
-    ['点赞次数', '评论次数', '分享次数', '新增关注人数'].forEach((key, index) => {
-      metrics[key] = values[index] || '';
-    });
-  }
-  return metrics;
-}
-
-function extractKuaishouMetrics(text) {
-  const lines = cleanOcrText(text).split('\n').map(v => v.trim()).filter(Boolean);
-  const headerIndex = lines.findIndex(line => line.includes('开播时间') && line.includes('直播时长(分钟)') && line.includes('送礼人数'));
-  const metrics = {};
-  if (headerIndex >= 0 && lines[headerIndex + 1]) {
-    const row = lines[headerIndex + 1];
-    metrics['开播时间'] = extractFirst(row, /(20[0-9]{2}-[0-9]{2}-[0-9]{2}\s+[0-9:]{8})/);
-    const afterTime = row.replace(/^.*?(20[0-9]{2}-[0-9]{2}-[0-9]{2}\s+[0-9:]{8})\s*/, '');
-    const values = afterTime.match(/[0-9]+(?:\.[0-9]+)?/g) || [];
-    const keys = ['直播时长(分钟)', '直播观众数', '在线人数峰值', '点赞数', '评论人数', '分享人数', '送礼人数'];
-    keys.forEach((key, index) => {
-      metrics[key] = values[index] || '';
-    });
-  }
-  return metrics;
+  for (const label of labels) if (!(label in result)) result[label] = '';
+  return result;
 }
 
 function extractMetrics(platform, text) {
-  if (platform === 'douyin') return extractDouyinMetrics(text);
-  if (platform === 'videohao') return extractVideohaoMetrics(text);
-  if (platform === 'kuaishou') return extractKuaishouMetrics(text);
-  return {};
+  const labels = PLATFORM_LABELS[platform];
+  if (!labels) return {};
+  return parseLabeledLines(text, labels);
 }
 
 function summarizeMetrics(metrics) {
@@ -459,46 +408,20 @@ async function ensureBitable() {
   const fields = [
     { field_name: '日期', type: 5 },
 
-    { field_name: '抖音-开播时间', type: 1 },
-    { field_name: '抖音-关播时间', type: 1 },
     { field_name: '抖音-直播时长', type: 1 },
-    { field_name: '抖音-收获音浪', type: 1 },
-    { field_name: '抖音-送礼人数', type: 1 },
-    { field_name: '抖音-送礼率', type: 1 },
-    { field_name: '抖音-曝光人数', type: 1 },
-    { field_name: '抖音-进房人数', type: 1 },
-    { field_name: '抖音-进房率', type: 1 },
-    { field_name: '抖音-人均停留时长', type: 1 },
-    { field_name: '抖音-评论人数', type: 1 },
-    { field_name: '抖音-点赞次数', type: 1 },
-    { field_name: '抖音-会员收入', type: 1 },
-    { field_name: '抖音-星守护收入', type: 1 },
-    { field_name: '抖音-预计本场收入', type: 1 },
-    { field_name: '抖音-平均在线人数', type: 1 },
-    { field_name: '抖音-最高在线人数', type: 1 },
+    { field_name: '抖音-观看人数', type: 1 },
+    { field_name: '抖音-成交金额', type: 1 },
     { field_name: '抖音-新增粉丝', type: 1 },
-    { field_name: '抖音-分享次数', type: 1 },
-    { field_name: '抖音-加粉丝团人数', type: 1 },
 
-    { field_name: '视频号-开播时间', type: 1 },
-    { field_name: '视频号-开播时长', type: 1 },
+    { field_name: '视频号-直播时长', type: 1 },
     { field_name: '视频号-观看人数', type: 1 },
-    { field_name: '视频号-观看次数', type: 1 },
-    { field_name: '视频号-最高在线', type: 1 },
-    { field_name: '视频号-平均观看时长', type: 1 },
-    { field_name: '视频号-点赞次数', type: 1 },
-    { field_name: '视频号-评论次数', type: 1 },
-    { field_name: '视频号-分享次数', type: 1 },
-    { field_name: '视频号-新增关注人数', type: 1 },
+    { field_name: '视频号-成交金额', type: 1 },
+    { field_name: '视频号-成交人数', type: 1 },
 
-    { field_name: '快手-开播时间', type: 1 },
-    { field_name: '快手-直播时长(分钟)', type: 1 },
-    { field_name: '快手-直播观众数', type: 1 },
-    { field_name: '快手-在线人数峰值', type: 1 },
-    { field_name: '快手-点赞数', type: 1 },
-    { field_name: '快手-评论人数', type: 1 },
-    { field_name: '快手-分享人数', type: 1 },
-    { field_name: '快手-送礼人数', type: 1 },
+    { field_name: '快手-直播时长', type: 1 },
+    { field_name: '快手-曝光人数', type: 1 },
+    { field_name: '快手-成交金额', type: 1 },
+    { field_name: '快手-客单价', type: 1 },
   ];
 
   for (const field of fields) {
@@ -527,46 +450,20 @@ async function createRecord(payload) {
       '主播': payload.anchorName,
       '日期': toFeishuDate(payload.date),
 
-      '抖音-开播时间': metricOf(dy, '开播时间'),
-      '抖音-关播时间': metricOf(dy, '关播时间'),
       '抖音-直播时长': metricOf(dy, '直播时长'),
-      '抖音-收获音浪': metricOf(dy, '收获音浪'),
-      '抖音-送礼人数': metricOf(dy, '送礼人数'),
-      '抖音-送礼率': metricOf(dy, '送礼率'),
-      '抖音-曝光人数': metricOf(dy, '曝光人数'),
-      '抖音-进房人数': metricOf(dy, '进房人数'),
-      '抖音-进房率': metricOf(dy, '进房率'),
-      '抖音-人均停留时长': metricOf(dy, '人均停留时长') || metricOf(dy, '停留时长'),
-      '抖音-评论人数': metricOf(dy, '评论人数'),
-      '抖音-点赞次数': metricOf(dy, '点赞次数'),
-      '抖音-会员收入': metricOf(dy, '会员收入'),
-      '抖音-星守护收入': metricOf(dy, '星守护收入'),
-      '抖音-预计本场收入': metricOf(dy, '预计本场收入'),
-      '抖音-平均在线人数': metricOf(dy, '平均在线人数'),
-      '抖音-最高在线人数': metricOf(dy, '最高在线人数'),
+      '抖音-观看人数': metricOf(dy, '观看人数'),
+      '抖音-成交金额': metricOf(dy, '成交金额'),
       '抖音-新增粉丝': metricOf(dy, '新增粉丝'),
-      '抖音-分享次数': metricOf(dy, '分享次数'),
-      '抖音-加粉丝团人数': metricOf(dy, '加粉丝团人数'),
 
-      '视频号-开播时间': metricOf(vh, '开播时间'),
-      '视频号-开播时长': metricOf(vh, '开播时长') || metricOf(vh, '直播时长'),
+      '视频号-直播时长': metricOf(vh, '直播时长'),
       '视频号-观看人数': metricOf(vh, '观看人数'),
-      '视频号-观看次数': metricOf(vh, '观看次数'),
-      '视频号-最高在线': metricOf(vh, '最高在线'),
-      '视频号-平均观看时长': metricOf(vh, '平均观看时长'),
-      '视频号-点赞次数': metricOf(vh, '点赞次数'),
-      '视频号-评论次数': metricOf(vh, '评论次数'),
-      '视频号-分享次数': metricOf(vh, '分享次数'),
-      '视频号-新增关注人数': metricOf(vh, '新增关注人数'),
+      '视频号-成交金额': metricOf(vh, '成交金额'),
+      '视频号-成交人数': metricOf(vh, '成交人数'),
 
-      '快手-开播时间': metricOf(ks, '开播时间'),
-      '快手-直播时长(分钟)': metricOf(ks, '直播时长(分钟)') || metricOf(ks, '直播时长'),
-      '快手-直播观众数': metricOf(ks, '直播观众数') || metricOf(ks, '观看人数'),
-      '快手-在线人数峰值': metricOf(ks, '在线人数峰值') || metricOf(ks, '最高在线'),
-      '快手-点赞数': metricOf(ks, '点赞数') || metricOf(ks, '点赞次数'),
-      '快手-评论人数': metricOf(ks, '评论人数'),
-      '快手-分享人数': metricOf(ks, '分享人数') || metricOf(ks, '分享次数'),
-      '快手-送礼人数': metricOf(ks, '送礼人数')
+      '快手-直播时长': metricOf(ks, '直播时长'),
+      '快手-曝光人数': metricOf(ks, '曝光人数'),
+      '快手-成交金额': metricOf(ks, '成交金额'),
+      '快手-客单价': metricOf(ks, '客单价')
     }
   };
 
