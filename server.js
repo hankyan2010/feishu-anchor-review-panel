@@ -492,15 +492,44 @@ async function ensureBitable() {
   const duplicateAnchorField = existingFields.find(field => !field.is_primary && field.field_name === '主播');
 
   if (primaryField && primaryField.field_name !== '主播') {
-    if (duplicateAnchorField) {
-      await updateField(config.feishu.appToken, config.feishu.tableId, duplicateAnchorField.field_id, { field_name: '主播_待删' });
+    try {
+      if (duplicateAnchorField) {
+        await updateField(config.feishu.appToken, config.feishu.tableId, duplicateAnchorField.field_id, { field_name: '主播_待删', type: duplicateAnchorField.type || 1 });
+      }
+      await updateField(config.feishu.appToken, config.feishu.tableId, primaryField.field_id, { field_name: '主播', type: primaryField.type || 1 });
+      existingFields = await listFields(config.feishu.appToken, config.feishu.tableId);
+    } catch (e) {
+      console.error('[ensureBitable] 改主键名失败:', e.message, JSON.stringify(e.payload || {}));
+      throw e;
     }
-    await updateField(config.feishu.appToken, config.feishu.tableId, primaryField.field_id, { field_name: '主播' });
-    existingFields = await listFields(config.feishu.appToken, config.feishu.tableId);
   }
 
   const staleAnchorField = existingFields.find(field => !field.is_primary && (field.field_name === '主播' || field.field_name === '主播_待删'));
-  if (staleAnchorField) await removeField(config.feishu.appToken, config.feishu.tableId, staleAnchorField.field_id);
+  if (staleAnchorField) {
+    try { await removeField(config.feishu.appToken, config.feishu.tableId, staleAnchorField.field_id); }
+    catch (e) { console.error('[ensureBitable] 删旧主播字段失败（忽略）:', e.message); }
+  }
+
+  // 清理飞书默认建的垃圾字段（单选、附件等）
+  const FEISHU_DEFAULT_GARBAGE = new Set(['单选', '附件', '多选', '文本']);
+  const targetNamesPreview = new Set([
+    '主播', '日期', 'OCR引擎',
+    ...PLATFORM_FIELDS.douyin.map(f => `抖音-${f}`),
+    ...PLATFORM_FIELDS.videohao.map(f => `视频号-${f}`),
+    ...PLATFORM_FIELDS.kuaishou.map(f => `快手-${f}`)
+  ]);
+  for (const f of existingFields) {
+    if (f.is_primary) continue;
+    if (FEISHU_DEFAULT_GARBAGE.has(f.field_name) && !targetNamesPreview.has(f.field_name)) {
+      try {
+        await removeField(config.feishu.appToken, config.feishu.tableId, f.field_id);
+        console.log(`[ensureBitable] 已清理默认字段: ${f.field_name}`);
+      } catch (e) {
+        console.error(`[ensureBitable] 清理 ${f.field_name} 失败:`, e.message);
+      }
+    }
+  }
+  existingFields = await listFields(config.feishu.appToken, config.feishu.tableId);
 
   const fields = [
     { field_name: '日期', type: 5 },
@@ -511,9 +540,19 @@ async function ensureBitable() {
     ...PLATFORM_FIELDS.kuaishou.map(f => ({ field_name: `快手-${f}`, type: 1 }))
   ];
 
+  const existingNames = new Set(existingFields.map(f => f.field_name));
+  let created = 0, skipped = 0, failed = 0;
   for (const field of fields) {
-    await ensureField(config.feishu.appToken, config.feishu.tableId, field);
+    if (existingNames.has(field.field_name)) { skipped += 1; continue; }
+    try {
+      await ensureField(config.feishu.appToken, config.feishu.tableId, field);
+      created += 1;
+    } catch (e) {
+      failed += 1;
+      console.error(`[ensureBitable] 字段 "${field.field_name}" 创建失败:`, e.message, JSON.stringify(e.payload || {}));
+    }
   }
+  console.log(`[ensureBitable] 字段创建结果 created=${created} skipped=${skipped} failed=${failed}`);
 
   return config.feishu;
 }
