@@ -1,6 +1,6 @@
 {
   "name": "feishu-anchor-review-panel",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "主播复盘入表台：上传抖音/视频号/快手三平台直播截图，OCR 提取关键指标后一键写入飞书多维表格",
   "main": "server.js",

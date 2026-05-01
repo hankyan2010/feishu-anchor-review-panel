@@ -213,7 +213,7 @@
         <div id="kuaishouSummary" class="summary">暂无</div>
       </div>
     </div>
-    <div class="version">版本号：v0.2.0</div>
+    <div class="version">版本号：v0.3.0 · OCR：<span id="ocrEngine">检测中</span></div>
   </div>
 
   <script>
@@ -321,6 +321,8 @@
         btn.href = '#';
         tag.textContent = '飞书表将在首次写入时创建';
       }
+      const eng = document.getElementById('ocrEngine');
+      if (eng) eng.textContent = data.ocrEngine === 'doubao' ? '豆包视觉' : 'tesseract（兜底）';
     }
 
     async function withBusy(button, fn) {

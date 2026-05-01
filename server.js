@@ -231,32 +231,129 @@ function cleanOcrText(text) {
     .trim();
 }
 
-const PLATFORM_LABELS = {
-  douyin: ['直播时长', '观看人数', '成交金额', '新增粉丝'],
-  videohao: ['直播时长', '观看人数', '成交金额', '成交人数'],
-  kuaishou: ['直播时长', '曝光人数', '成交金额', '客单价']
+const PLATFORM_FIELDS = {
+  douyin: [
+    '开播时间', '关播时间', '直播时长',
+    '收获音浪', '送礼人数', '送礼率', '会员收入', '星守护收入', '预计本场收入',
+    '曝光人数', '进房人数', '进房率', '平均在线人数', '最高在线人数',
+    '人均停留时长', '评论人数', '点赞次数', '新增粉丝', '分享次数', '加粉丝团人数'
+  ],
+  videohao: [
+    '开播时间', '开播时长',
+    '观看人数', '观看次数', '最高在线', '平均观看时长',
+    '点赞次数', '评论次数', '分享次数', '新增关注人数'
+  ],
+  kuaishou: [
+    '开播时间', '直播时长(分钟)', '直播观众数', '在线人数峰值',
+    '点赞数', '评论人数', '分享人数', '送礼人数'
+  ]
 };
 
-function parseLabeledLines(text, labels) {
-  const result = {};
-  const lines = String(text || '').split('\n').map(v => v.trim()).filter(Boolean);
-  for (const line of lines) {
-    for (const label of labels) {
-      if (line.startsWith(label)) {
-        const value = line.slice(label.length).replace(/^[:：\s]+/, '').trim();
-        if (value && !result[label]) result[label] = value;
-        break;
+const PLATFORM_LABELS_CN = { douyin: '抖音', videohao: '视频号', kuaishou: '快手' };
+
+const PLATFORM_PROMPT_HINTS = {
+  douyin: '这是抖音直播复盘后台截图。注意：营收/流量/互动三个指标卡，每张卡里"指标名"和"数值"分行排列。如果该指标显示为 0、0元、0%，请如实填 "0"、"0元"、"0%"。',
+  videohao: '这是视频号直播复盘后台截图。注意：基础数据 4 个 + 互动数据 4 个，"指标名"和"数值"分行排列；开播时长格式如"00小时24分15秒"。',
+  kuaishou: '这是快手直播历史列表的截图，可能包含多行。请只提取**第一行**（最近一场直播）的数据。'
+};
+
+function buildVisionPrompt(platform) {
+  const fields = PLATFORM_FIELDS[platform];
+  const hint = PLATFORM_PROMPT_HINTS[platform] || '';
+  const schema = fields.map(f => `  "${f}": "..."`).join(',\n');
+  return [
+    `你是一个数据提取助手。${hint}`,
+    '请从图中提取以下字段，严格按照 JSON 格式输出，不要任何解释、不要 markdown 代码块标记：',
+    '{',
+    schema,
+    '}',
+    '所有值都用字符串类型。如果某个字段在图中找不到，填空字符串 ""。',
+    '时间字段保留原格式（如 "2026-04-09 15:41:23"）。',
+    '数值带单位的保留单位（如 "1,914"、"14.5%"、"0.5分钟"、"1小时2分钟58秒"）。'
+  ].join('\n');
+}
+
+function callDoubaoVision(filePath, platform) {
+  return new Promise((resolve, reject) => {
+    const apiKey = process.env.ARK_API_KEY;
+    const modelId = process.env.ARK_MODEL_ID;
+    if (!apiKey || !modelId) {
+      reject(new Error('ARK_API_KEY 或 ARK_MODEL_ID 未配置'));
+      return;
+    }
+    const base64 = fs.readFileSync(filePath).toString('base64');
+    const body = JSON.stringify({
+      model: modelId,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${base64}` } },
+          { type: 'text', text: buildVisionPrompt(platform) }
+        ]
+      }],
+      temperature: 0.1
+    });
+    const req = https.request({
+      hostname: 'ark.cn-beijing.volces.com',
+      port: 443,
+      path: '/api/v3/chat/completions',
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    }, (res) => {
+      let raw = '';
+      res.on('data', c => raw += c);
+      res.on('end', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          reject(new Error(`豆包 ${res.statusCode}: ${raw.slice(0, 300)}`));
+          return;
+        }
+        try {
+          const data = JSON.parse(raw);
+          const content = data?.choices?.[0]?.message?.content || '';
+          const cleaned = content.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+          const metrics = JSON.parse(cleaned);
+          resolve({ metrics, raw: content });
+        } catch (e) {
+          reject(new Error(`豆包返回非 JSON: ${e.message} | ${raw.slice(0, 300)}`));
+        }
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(60000, () => { req.destroy(new Error('豆包请求超时')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+async function recognizePlatform(filePath, platform) {
+  const fields = PLATFORM_FIELDS[platform] || [];
+  const useDoubao = process.env.ARK_API_KEY && process.env.ARK_MODEL_ID;
+  if (useDoubao) {
+    try {
+      const { metrics, raw } = await callDoubaoVision(filePath, platform);
+      const normalized = {};
+      for (const f of fields) normalized[f] = String(metrics[f] || '').trim();
+      return { platform, engine: 'doubao', rawText: raw, metrics: normalized };
+    } catch (err) {
+      appendRuntimeLog('豆包视觉失败回退 tesseract', { platform, error: err.message });
+    }
+  }
+  const rawText = cleanOcrText(await runTesseract(filePath));
+  const metrics = {};
+  for (const f of fields) metrics[f] = '';
+  for (const line of rawText.split('\n')) {
+    for (const f of fields) {
+      if (!metrics[f] && line.includes(f)) {
+        const value = line.slice(line.indexOf(f) + f.length).replace(/^[:：\s]+/, '').trim();
+        if (value) metrics[f] = value;
       }
     }
   }
-  for (const label of labels) if (!(label in result)) result[label] = '';
-  return result;
-}
-
-function extractMetrics(platform, text) {
-  const labels = PLATFORM_LABELS[platform];
-  if (!labels) return {};
-  return parseLabeledLines(text, labels);
+  return { platform, engine: 'tesseract', rawText, metrics };
 }
 
 function summarizeMetrics(metrics) {
@@ -271,17 +368,17 @@ async function ocrImages(images) {
   try {
     for (const key of Object.keys(images)) files[key] = writeTempImage(key, images[key].base64);
     const result = {};
-    for (const key of ['douyin', 'videohao', 'kuaishou']) {
-      const rawText = await runTesseract(files[key]);
-      const cleaned = cleanOcrText(rawText);
-      const metrics = extractMetrics(key, cleaned);
+    const tasks = ['douyin', 'videohao', 'kuaishou'].map(async key => {
+      const recognized = await recognizePlatform(files[key], key);
       result[key] = {
         platform: key,
-        rawText: cleaned,
-        metrics,
-        summary: summarizeMetrics(metrics)
+        engine: recognized.engine,
+        rawText: recognized.rawText,
+        metrics: recognized.metrics,
+        summary: summarizeMetrics(recognized.metrics)
       };
-    }
+    });
+    await Promise.all(tasks);
     return result;
   } finally {
     for (const file of Object.values(files)) {
@@ -407,21 +504,11 @@ async function ensureBitable() {
 
   const fields = [
     { field_name: '日期', type: 5 },
+    { field_name: 'OCR引擎', type: 1 },
 
-    { field_name: '抖音-直播时长', type: 1 },
-    { field_name: '抖音-观看人数', type: 1 },
-    { field_name: '抖音-成交金额', type: 1 },
-    { field_name: '抖音-新增粉丝', type: 1 },
-
-    { field_name: '视频号-直播时长', type: 1 },
-    { field_name: '视频号-观看人数', type: 1 },
-    { field_name: '视频号-成交金额', type: 1 },
-    { field_name: '视频号-成交人数', type: 1 },
-
-    { field_name: '快手-直播时长', type: 1 },
-    { field_name: '快手-曝光人数', type: 1 },
-    { field_name: '快手-成交金额', type: 1 },
-    { field_name: '快手-客单价', type: 1 },
+    ...PLATFORM_FIELDS.douyin.map(f => ({ field_name: `抖音-${f}`, type: 1 })),
+    ...PLATFORM_FIELDS.videohao.map(f => ({ field_name: `视频号-${f}`, type: 1 })),
+    ...PLATFORM_FIELDS.kuaishou.map(f => ({ field_name: `快手-${f}`, type: 1 }))
   ];
 
   for (const field of fields) {
@@ -445,27 +532,16 @@ async function createRecord(payload) {
   const dy = payload.results.douyin || {};
   const vh = payload.results.videohao || {};
   const ks = payload.results.kuaishou || {};
-  const recordData = {
-    fields: {
-      '主播': payload.anchorName,
-      '日期': toFeishuDate(payload.date),
-
-      '抖音-直播时长': metricOf(dy, '直播时长'),
-      '抖音-观看人数': metricOf(dy, '观看人数'),
-      '抖音-成交金额': metricOf(dy, '成交金额'),
-      '抖音-新增粉丝': metricOf(dy, '新增粉丝'),
-
-      '视频号-直播时长': metricOf(vh, '直播时长'),
-      '视频号-观看人数': metricOf(vh, '观看人数'),
-      '视频号-成交金额': metricOf(vh, '成交金额'),
-      '视频号-成交人数': metricOf(vh, '成交人数'),
-
-      '快手-直播时长': metricOf(ks, '直播时长'),
-      '快手-曝光人数': metricOf(ks, '曝光人数'),
-      '快手-成交金额': metricOf(ks, '成交金额'),
-      '快手-客单价': metricOf(ks, '客单价')
-    }
+  const engines = [dy.engine, vh.engine, ks.engine].filter(Boolean);
+  const fields = {
+    '主播': payload.anchorName,
+    '日期': toFeishuDate(payload.date),
+    'OCR引擎': engines.length ? Array.from(new Set(engines)).join('+') : ''
   };
+  for (const f of PLATFORM_FIELDS.douyin) fields[`抖音-${f}`] = metricOf(dy, f);
+  for (const f of PLATFORM_FIELDS.videohao) fields[`视频号-${f}`] = metricOf(vh, f);
+  for (const f of PLATFORM_FIELDS.kuaishou) fields[`快手-${f}`] = metricOf(ks, f);
+  const recordData = { fields };
 
   const data = await feishuRequest('POST', `/open-apis/bitable/v1/apps/${feishu.appToken}/tables/${feishu.tableId}/records`, recordData);
   return { recordId: data.record.record_id, tableUrl: feishu.tableUrl };
@@ -518,7 +594,8 @@ const server = http.createServer(async (req, res) => {
       port: PORT,
       tableUrl: config.feishu.tableUrl,
       appTokenReady: Boolean(config.feishu.appToken),
-      tableIdReady: Boolean(config.feishu.tableId)
+      tableIdReady: Boolean(config.feishu.tableId),
+      ocrEngine: (process.env.ARK_API_KEY && process.env.ARK_MODEL_ID) ? 'doubao' : 'tesseract'
     });
   }
 
