@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>主播复盘入表台</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --line: #334155;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --brand: #38bdf8;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #020617 0%, #111827 100%);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .hero, .card {
+      background: rgba(15, 23, 42, 0.88);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: 0 12px 40px rgba(0,0,0,.24);
+      backdrop-filter: blur(12px);
+    }
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p { margin: 0; color: var(--muted); line-height: 1.6; }
+    .grid { display: grid; gap: 18px; grid-template-columns: repeat(12, 1fr); }
+    .span-12 { grid-column: span 12; }
+    .span-6 { grid-column: span 6; }
+    .span-4 { grid-column: span 4; }
+    .field label { display:block; margin-bottom: 8px; font-weight: 600; }
+    input, textarea, button {
+      font: inherit;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+    }
+    input, textarea {
+      width: 100%;
+      padding: 12px 14px;
+      background: #020617;
+      color: var(--text);
+    }
+    textarea { min-height: 140px; resize: vertical; }
+    input[type="file"] {
+      padding: 12px;
+      background: rgba(2,6,23,.7);
+    }
+    .upload {
+      border: 1px dashed rgba(56, 189, 248, .45);
+      border-radius: 18px;
+      padding: 16px;
+      background: rgba(2, 6, 23, .55);
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 4px;
+    }
+    button, .link-btn {
+      cursor: pointer;
+      padding: 12px 18px;
+      border: none;
+      background: linear-gradient(135deg, #0ea5e9, #2563eb);
+      color: white;
+      font-weight: 700;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    button.secondary, .link-btn.secondary {
+      background: #1e293b;
+      border: 1px solid var(--line);
+    }
+    button:disabled { opacity: .6; cursor: wait; }
+    .tag {
+      display: inline-flex;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(34, 197, 94, .12);
+      color: #86efac;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .status {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(15,23,42,.72);
+      color: var(--muted);
+      white-space: pre-wrap;
+    }
+    .status.error { color: #fecaca; border: 1px solid rgba(239,68,68,.35); }
+    .status.success { color: #bbf7d0; border: 1px solid rgba(34,197,94,.35); }
+    .platform-title { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:10px; }
+    .summary { color:#cbd5e1; font-size:14px; margin-top:10px; line-height:1.6; }
+    .log-box {
+      background: rgba(2,6,23,.7);
+      border: 1px solid rgba(148,163,184,.18);
+      border-radius: 16px;
+      padding: 12px 14px;
+      min-height: 140px;
+      white-space: pre-wrap;
+      color: #cbd5e1;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .version {
+      margin-top: 18px;
+      text-align: right;
+      color: #94a3b8;
+      font-size: 12px;
+    }
+    @media (max-width: 900px) {
+      .span-6, .span-4 { grid-column: span 12; }
+      .hero { flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <div>
+        <h1>主播复盘入表台</h1>
+        <p>填主播名，上传抖音 / 视频号 / 快手三张图，先 OCR 预览，再一键写入飞书多维表格。</p>
+      </div>
+      <div>
+        <span id="tableTag" class="tag">飞书表未就绪</span>
+      </div>
+    </div>
+
+    <div class="card span-12">
+      <div class="grid">
+        <div class="field span-6">
+          <label>主播选择</label>
+          <div class="actions" style="margin-top:0;">
+            <select id="anchorName" style="flex:1; min-width:220px; padding:12px 14px; border-radius:14px; border:1px solid var(--line); background:#020617; color:var(--text);"></select>
+            <button id="addAnchorBtn" type="button">新增主播</button>
+            <button id="deleteAnchorBtn" type="button" class="secondary">删除当前主播</button>
+          </div>
+        </div>
+        <div class="field span-6">
+          <label>复盘日期</label>
+          <input id="date" type="date" />
+        </div>
+
+        <div class="upload span-4">
+          <div class="platform-title"><strong>抖音截图</strong></div>
+          <input id="douyin" type="file" accept="image/*" />
+        </div>
+        <div class="upload span-4">
+          <div class="platform-title"><strong>视频号截图</strong></div>
+          <input id="videohao" type="file" accept="image/*" />
+        </div>
+        <div class="upload span-4">
+          <div class="platform-title"><strong>快手截图</strong></div>
+          <input id="kuaishou" type="file" accept="image/*" />
+        </div>
+
+        <div class="field span-12">
+          <label>补充备注（可选）</label>
+          <textarea id="note" placeholder="比如：今天是午场、临时换品、流量异常等"></textarea>
+        </div>
+
+        <div class="span-12 actions">
+          <button id="submitBtn">一键识别并写入飞书</button>
+          <a id="openTableBtn" class="link-btn secondary" href="#" target="_blank" rel="noreferrer">快捷打开飞书表</a>
+        </div>
+
+        <div id="status" class="status span-12">准备好了。</div>
+        <div class="span-12">
+          <div class="log-box" id="runtimeLog">运行日志会显示在这里。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:18px;">
+      <div class="card span-4">
+        <div class="platform-title"><strong>抖音识别结果</strong></div>
+        <textarea id="douyinText" placeholder="这里会显示 OCR 原文"></textarea>
+        <div id="douyinSummary" class="summary">暂无</div>
+      </div>
+      <div class="card span-4">
+        <div class="platform-title"><strong>视频号识别结果</strong></div>
+        <textarea id="videohaoText" placeholder="这里会显示 OCR 原文"></textarea>
+        <div id="videohaoSummary" class="summary">暂无</div>
+      </div>
+      <div class="card span-4">
+        <div class="platform-title"><strong>快手识别结果</strong></div>
+        <textarea id="kuaishouText" placeholder="这里会显示 OCR 原文"></textarea>
+        <div id="kuaishouSummary" class="summary">暂无</div>
+      </div>
+    </div>
+    <div class="version">版本号：v2026.05.01.4</div>
+  </div>
+
+  <script>
+    const ids = ['douyin', 'videohao', 'kuaishou'];
+    const state = { results: null, tableUrl: '', anchors: [] };
+
+    function setStatus(message, type = '') {
+      const el = document.getElementById('status');
+      el.className = `status span-12 ${type}`.trim();
+      el.textContent = message;
+    }
+
+    function appendLog(message) {
+      const el = document.getElementById('runtimeLog');
+      const ts = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+      const old = el.textContent === '运行日志会显示在这里。' ? '' : el.textContent;
+      el.textContent = `[${ts}] ${message}\n` + old;
+    }
+
+    async function refreshRuntimeLog() {
+      try {
+        const data = await requestJson('api/runtime-log');
+        const lines = data.lines || [];
+        document.getElementById('runtimeLog').textContent = lines.length
+          ? lines.map(x => `[${(x.time || '').replace('T',' ').slice(0,19)}] ${x.message}${x.eta ? `（预计${x.eta}）` : ''}${x.error ? `｜${x.error}` : ''}`).reverse().join('\n')
+          : '运行日志会显示在这里。';
+      } catch {}
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function collectImages() {
+      const images = {};
+      for (const id of ids) {
+        const file = document.getElementById(id).files[0];
+        if (!file) throw new Error(`请上传${id}图片`);
+        images[id] = { name: file.name, base64: await fileToBase64(file) };
+      }
+      return images;
+    }
+
+    function renderResults(results) {
+      state.results = results;
+      for (const id of ids) {
+        document.getElementById(`${id}Text`).value = results[id]?.rawText || '';
+        document.getElementById(`${id}Summary`).textContent = results[id]?.summary || '暂无';
+      }
+    }
+
+    function collectEditedResults() {
+      if (!state.results) return null;
+      const copy = JSON.parse(JSON.stringify(state.results));
+      for (const id of ids) {
+        copy[id].rawText = document.getElementById(`${id}Text`).value.trim();
+        copy[id].summary = document.getElementById(`${id}Summary`).textContent.trim();
+      }
+      return copy;
+    }
+
+    async function requestJson(url, method = 'GET', payload) {
+      const response = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: payload ? JSON.stringify(payload) : undefined
+      });
+      const data = await response.json();
+      if (!data.ok) throw data.error || { message: '请求失败' };
+      return data;
+    }
+
+    async function postJson(url, payload) {
+      return requestJson(url, 'POST', payload);
+    }
+
+    function renderAnchors(anchors) {
+      state.anchors = anchors || [];
+      const select = document.getElementById('anchorName');
+      const current = select.value;
+      select.innerHTML = '<option value="">请选择主播</option>' + state.anchors.map(a => `<option value="${a.name}" data-id="${a.id}">${a.name}</option>`).join('');
+      if (current && state.anchors.some(a => a.name === current)) select.value = current;
+    }
+
+    async function refreshAnchors() {
+      const data = await requestJson('api/anchors');
+      renderAnchors(data.anchors || []);
+    }
+
+    async function refreshStatus() {
+      const response = await fetch('api/status');
+      const data = await response.json();
+      state.tableUrl = data.tableUrl || '';
+      const btn = document.getElementById('openTableBtn');
+      const tag = document.getElementById('tableTag');
+      if (state.tableUrl) {
+        btn.href = state.tableUrl;
+        tag.textContent = '飞书表已就绪';
+      } else {
+        btn.href = '#';
+        tag.textContent = '飞书表将在首次写入时创建';
+      }
+    }
+
+    async function withBusy(button, fn) {
+      const old = button.textContent;
+      button.disabled = true;
+      button.textContent = '处理中...';
+      try { await fn(); }
+      finally { button.disabled = false; button.textContent = old; }
+    }
+
+    document.getElementById('addAnchorBtn').addEventListener('click', async () => {
+      const name = window.prompt('请输入新主播名字');
+      if (!name) return;
+      try {
+        const data = await postJson('api/anchors', { name });
+        renderAnchors(data.anchors || []);
+        document.getElementById('anchorName').value = data.anchor.name;
+        setStatus(`已新增主播：${data.anchor.name}`, 'success');
+      } catch (err) {
+        setStatus(err.message || '新增主播失败', 'error');
+      }
+    });
+
+    document.getElementById('deleteAnchorBtn').addEventListener('click', async () => {
+      const select = document.getElementById('anchorName');
+      const id = select.options[select.selectedIndex]?.dataset?.id;
+      const name = select.value;
+      if (!id || !name) return setStatus('请先选择主播', 'error');
+      if (!window.confirm(`确认删除主播「${name}」？历史记录不会删除。`)) return;
+      try {
+        const data = await requestJson('api/anchors', 'DELETE', { id });
+        renderAnchors(data.anchors || []);
+        setStatus(`已删除主播：${name}`, 'success');
+      } catch (err) {
+        setStatus(err.message || '删除主播失败', 'error');
+      }
+    });
+
+    document.getElementById('submitBtn').addEventListener('click', async (e) => {
+      await withBusy(e.target, async () => {
+        const anchorName = document.getElementById('anchorName').value.trim();
+        const date = document.getElementById('date').value;
+        const note = document.getElementById('note').value.trim();
+        if (!anchorName) throw new Error('请先选择主播');
+
+        appendLog('正在 OCR 识别，预计需要 15~30 秒');
+        setStatus('正在 OCR 识别...');
+        const images = await collectImages();
+        const ocr = await postJson('api/ocr-preview', { images });
+        renderResults(ocr.results);
+
+        appendLog('正在写入飞书表格，预计需要 5~15 秒');
+        setStatus('正在写入飞书表格...');
+        const data = await postJson('api/submit', {
+          anchorName,
+          date,
+          note,
+          results: ocr.results
+        });
+
+        appendLog('正在大模型检查结果，预计需要 10~20 秒');
+        setStatus('正在大模型检查结果...');
+        const qa = await postJson('api/qa-check', {
+          anchorName,
+          results: ocr.results,
+          recordId: data.record?.recordId || ''
+        });
+
+        if (data.record?.tableUrl) {
+          state.tableUrl = data.record.tableUrl;
+          document.getElementById('openTableBtn').href = state.tableUrl;
+          document.getElementById('tableTag').textContent = '飞书表已就绪';
+        }
+        appendLog(`完成：写入成功，抽检结果：${qa.check?.passed ? '通过' : '未通过'}`);
+        setStatus(`写入成功。记录ID：${data.record.recordId}`, 'success');
+        refreshRuntimeLog();
+      }).catch(err => {
+        const help = err.help ? `\n开权限链接：${err.help}` : '';
+        appendLog(`失败：${(err.message || '写入失败') + help}`);
+        setStatus((err.message || '写入失败') + help, 'error');
+      });
+    });
+
+    refreshStatus();
+    refreshAnchors();
+    refreshRuntimeLog();
+    document.getElementById('date').value = new Date().toISOString().slice(0, 10);
+  </script>
+</body>
+</html>
