@@ -194,12 +194,11 @@ function sanitizeBase64(input) {
 }
 
 function ensureImagePayload(images) {
-  const required = ['douyin', 'videohao', 'kuaishou'];
-  for (const key of required) {
-    if (!images || !images[key] || !images[key].base64) {
-      throw new Error(`缺少图片：${key}`);
-    }
-  }
+  const allowed = ['douyin', 'videohao', 'kuaishou'];
+  if (!images || typeof images !== 'object') throw new Error('未上传任何图片');
+  const provided = allowed.filter(k => images[k] && images[k].base64);
+  if (provided.length === 0) throw new Error('请至少上传一张平台截图');
+  return provided;
 }
 
 function writeTempImage(name, base64) {
@@ -363,12 +362,12 @@ function summarizeMetrics(metrics) {
 }
 
 async function ocrImages(images) {
-  ensureImagePayload(images);
+  const provided = ensureImagePayload(images);
   const files = {};
   try {
-    for (const key of Object.keys(images)) files[key] = writeTempImage(key, images[key].base64);
+    for (const key of provided) files[key] = writeTempImage(key, images[key].base64);
     const result = {};
-    const tasks = ['douyin', 'videohao', 'kuaishou'].map(async key => {
+    const tasks = provided.map(async key => {
       const recognized = await recognizePlatform(files[key], key);
       result[key] = {
         platform: key,

@@ -213,7 +213,7 @@
         <div id="kuaishouSummary" class="summary">暂无</div>
       </div>
     </div>
-    <div class="version">版本号：v0.3.0 · OCR：<span id="ocrEngine">检测中</span></div>
+    <div class="version">版本号：v0.3.1 · OCR：<span id="ocrEngine">检测中</span></div>
   </div>
 
   <script>
@@ -256,17 +256,19 @@
       const images = {};
       for (const id of ids) {
         const file = document.getElementById(id).files[0];
-        if (!file) throw new Error(`请上传${id}图片`);
+        if (!file) continue;
         images[id] = { name: file.name, base64: await fileToBase64(file) };
       }
+      if (Object.keys(images).length === 0) throw new Error('请至少上传一张平台截图');
       return images;
     }
 
     function renderResults(results) {
       state.results = results;
       for (const id of ids) {
-        document.getElementById(`${id}Text`).value = results[id]?.rawText || '';
-        document.getElementById(`${id}Summary`).textContent = results[id]?.summary || '暂无';
+        const has = results && results[id];
+        document.getElementById(`${id}Text`).value = has ? (results[id].rawText || '') : '';
+        document.getElementById(`${id}Summary`).textContent = has ? (results[id].summary || '暂无') : '未上传';
       }
     }
 
@@ -274,6 +276,7 @@
       if (!state.results) return null;
       const copy = JSON.parse(JSON.stringify(state.results));
       for (const id of ids) {
+        if (!copy[id]) continue;
         copy[id].rawText = document.getElementById(`${id}Text`).value.trim();
         copy[id].summary = document.getElementById(`${id}Summary`).textContent.trim();
       }
